@@ -2,6 +2,7 @@
 #include <ws2tcpip.h>
 #include <iostream>
 #include <string>
+#include <thread>
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -17,6 +18,56 @@ private:
 	SOCKET clientSocket = INVALID_SOCKET;
 
 	std::string serverPort;
+
+	std::string receiveMessage()
+	{
+		const int bufferlength = 512;
+		char buffer[bufferlength];
+		recv(clientSocket, buffer, bufferlength, NULL);
+		return std::string(buffer);
+	}
+
+	void sendMessage(std::string message)
+	{
+		send(clientSocket, message.c_str(), message.length() + 1, NULL);
+	}
+
+	void receiveThread()
+	{
+		bool quit = false;
+		std::string buffer;
+
+		while (quit != true)
+		{
+			buffer = receiveMessage();
+			std::cout << "Client: " << buffer << std::endl;
+
+			if (buffer == "disconnect")
+			{
+				quit = true;
+				break;
+			}
+		}
+	}
+
+	void senderThread()
+	{
+		bool quit = false;
+		std::string buffer;
+
+		while (quit != true)
+		{
+			std::getline(std::cin, buffer);
+			sendMessage(buffer);
+
+			if (buffer == "disconnect")
+			{
+				quit = true;
+				break;
+			}
+		}
+	}
+
 public:
 	tcpServer(std::string port)
 	{
@@ -44,19 +95,19 @@ public:
 	void acceptConnection()
 	{
 		clientSocket = accept(listenSocket, NULL, NULL);
+		std::cout << "client connected" << std::endl;
 	}
 
-	std::string receiveMessage()
+	void startReceiver()
 	{
-		const int bufferlength = 512;
-		char buffer[bufferlength];
-		recv(clientSocket, buffer, bufferlength, NULL);
-		return std::string(buffer);
+		std::thread receiver(&tcpServer::receiveThread, this);
+		receiver.detach();
 	}
 
-	void sendMessage(std::string message)
+	void startSender()
 	{
-		send(clientSocket, message.c_str(), message.length() + 1, NULL);
+		std::thread sender(&tcpServer::senderThread, this);
+		sender.join();
 	}
 
 	void serverShutdown()
@@ -69,7 +120,13 @@ public:
 
 int main()
 {
-	tcpServer server("27015");
+	std::string port;
+	std::cout << "Listen on port: ";
+	std::getline(std::cin, port);
+	std::cout << std::endl;
+
+	tcpServer server(port);
+
 	std::string messageBack;
 	std::string messageReceived;
 
@@ -77,21 +134,8 @@ int main()
 
 	server.acceptConnection();
 
-	bool exit = false;
-	while (exit != true)
-	{
-		messageReceived = server.receiveMessage();
-		if (messageReceived == "disconnect")
-		{
-			break;
-		}
-
-		std::cout << "Client said: " << messageReceived << std::endl;
-
-		std::cout << "Send back: ";
-		std::getline(std::cin, messageBack);
-		server.sendMessage(messageBack);
-	}
+	server.startReceiver();
+	server.startSender();
 
 	server.serverShutdown();
 	std::cout << "Process terminated... Press enter to close" << std::endl;

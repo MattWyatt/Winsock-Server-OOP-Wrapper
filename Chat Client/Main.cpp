@@ -2,6 +2,7 @@
 #include <ws2tcpip.h>
 #include <iostream>
 #include <string>
+#include <thread>
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -17,6 +18,55 @@ private:
 
 	std::string serverPort;
 	std::string serverIP;
+
+	std::string receiveMessage()
+	{
+		const int bufferlength = 512;
+		char buffer[bufferlength];
+		recv(clientSocket, buffer, bufferlength, NULL);
+		return std::string(buffer);
+	}
+
+	void sendMessage(std::string message)
+	{
+		send(clientSocket, message.c_str(), message.length() + 1, NULL);
+	}
+
+	void receiveThread()
+	{
+		bool quit = false;
+		std::string buffer;
+
+		while (quit != true)
+		{
+			buffer = receiveMessage();
+			std::cout << "Host: " <<  buffer << std::endl;
+
+			if (buffer == "disconnect")
+			{
+				quit = true;
+				break;
+			}
+		}
+	}
+
+	void senderThread()
+	{
+		bool quit = false;
+		std::string buffer;
+
+		while (quit != true)
+		{
+			std::getline(std::cin, buffer);
+			sendMessage(buffer);
+
+			if (buffer == "disconnect")
+			{
+				quit = true;
+				break;
+			}
+		}
+	}
 
 public:
 	tcpClient(std::string ip, std::string port)
@@ -39,19 +89,19 @@ public:
 	void serverConnect()
 	{
 		connect(clientSocket, result->ai_addr, result->ai_addrlen);
+		std::cout << "connected to server" << std::endl;
 	}
 
-	std::string receiveMessage()
+	void startReceiver()
 	{
-		const int bufferlength = 512;
-		char buffer[bufferlength];
-		recv(clientSocket, buffer, bufferlength, NULL);
-		return std::string(buffer);
+		std::thread receiver(&tcpClient::receiveThread, this);
+		receiver.detach();
 	}
 
-	void sendMessage(std::string message)
+	void startSender()
 	{
-		send(clientSocket, message.c_str(), message.length() + 1, NULL);
+		std::thread sender(&tcpClient::senderThread, this);
+		sender.join();
 	}
 
 	void clientShutdown()
@@ -61,47 +111,6 @@ public:
 		WSACleanup();
 	}
 };
-
-
-std::string prompt(std::string message)
-{
-	std::string buffer;
-	std::cout << message;
-	std::getline(std::cin, buffer);
-	return buffer;
-}
-
-void run_client()
-{
-	WSADATA wsaData;
-	WSAStartup(MAKEWORD(2, 2), &wsaData);
-
-	ADDRINFO hints;
-	ADDRINFO *result;
-
-	ZeroMemory(&hints, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_protocol = IPPROTO_TCP;
-
-	getaddrinfo(prompt("Server IP: ").c_str(), prompt("Server Port: ").c_str(), &hints, &result);
-
-	SOCKET client = INVALID_SOCKET;
-	client = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
-
-	connect(client, result->ai_addr, result->ai_addrlen);
-	std::string message = "hello, i'm client.";
-	send(client, message.c_str(), strlen(message.c_str()) + 1, 0);
-
-
-	shutdown(client, SD_SEND /*SD_BOTH*/); // finish send
-
-	const int buff_len = 512;
-	char recv_buff[buff_len];
-	recv(client, recv_buff, buff_len, 0);
-
-	closesocket(client);
-}
 
 int main()
 {
@@ -119,15 +128,8 @@ int main()
 	tcpClient client(ip, port);
 	client.serverConnect();
 
-	while (true)
-	{
-		std::cout << "Send Message: ";
-		std::getline(std::cin, message);
-		client.sendMessage(message);
-
-		messageReceived = client.receiveMessage();
-		std::cout << "Server Responded: " << messageReceived << std::endl;
-	}
+	client.startReceiver();
+	client.startSender();
 
 	client.clientShutdown();
 
